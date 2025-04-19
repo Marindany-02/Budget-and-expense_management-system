@@ -79,41 +79,61 @@ Class Master extends DBConnection {
 			return $this->conn;
 		}
 	}
-	function save_budget(){
-		extract($_POST);
-		$_POST['amount'] = str_replace(',','',$_POST['amount']);
-		$_POST['remarks'] = addslashes(htmlentities($_POST['remarks']));
-		$data = "";
-		foreach($_POST as $k =>$v){
-			if($k == 'id')
-				continue;
-			if(!empty($data)) $data .=",";
-			$data .= " `{$k}`='{$v}' ";
-		}
-		if(!empty($data)) $data .=",";
-			$data .= " `user_id`='{$this->settings->userdata('id')}' ";
-		if(empty($id)){
-			$sql = "INSERT INTO `running_balance` set $data";
-		}else{
-			$sql = "UPDATE `running_balance` set $data WHERE id ='{$id}'";
-		}
-		$save = $this->conn->query($sql);
-		if($save){
-			$update_balance =$this->update_balance($_POST['category_id']);
-			
-			if($update_balance == 1){
-				$resp['status'] ='success';
-				$this->settings->set_flashdata('success'," Budget successfully saved.");
-			}else{
-				$resp['status'] = 'failed';
-				$resp['error'] = $update_balance;
-			}
-		}else{
-			$resp['status'] = 'failed';
-			$resp['error'] = $this->conn;
-		}
-		return json_encode($resp);
-	}
+function save_budget(){
+    $resp = ['status' => 'failed'];
+    $post = $_POST;
+
+    // Ensure category_id is provided
+    if (!isset($post['category_id']) || empty($post['category_id'])) {
+        $resp['error'] = 'Category ID is required.';
+        return json_encode($resp);
+    }
+
+    // Clean up specific fields
+    $post['amount'] = isset($post['amount']) ? str_replace(',', '', $post['amount']) : 0;
+    $post['remarks'] = isset($post['remarks']) ? addslashes(htmlentities($post['remarks'])) : '';
+
+    $data = "";
+    foreach($post as $k => $v){
+        if($k == 'id') continue;
+
+        // Sanitize input
+        $v = $this->conn->real_escape_string($v);
+
+        if(!empty($data)) $data .= ",";
+        $data .= " `{$k}`='{$v}' ";
+    }
+
+    // Append user_id
+    if(!empty($data)) $data .= ",";
+    $data .= " `user_id`='{$this->settings->userdata('id')}' ";
+
+    // Create query
+    if(empty($post['id'])){
+        $sql = "INSERT INTO `running_balance` SET $data";
+    } else {
+        $sql = "UPDATE `running_balance` SET $data WHERE id ='{$post['id']}'";
+    }
+
+    $save = $this->conn->query($sql);
+
+    if($save){
+        // Now we can safely call update_balance using sanitized value
+        $category_id = $this->conn->real_escape_string($post['category_id']);
+        $update_balance = $this->update_balance($category_id);
+
+        if($update_balance == 1){
+            $resp['status'] = 'success';
+            $this->settings->set_flashdata('success', "Budget successfully saved.");
+        } else {
+            $resp['error'] = 'Balance update failed: ' . $update_balance;
+        }
+    } else {
+        $resp['error'] = 'Database Error: ' . $this->conn->error;
+    }
+
+    return json_encode($resp);
+}
 
 	function delete_budget(){
 		extract($_POST);
@@ -136,43 +156,52 @@ Class Master extends DBConnection {
 	function save_expense(){
 		extract($_POST);
 	
-		// ✅ Format amount and sanitize remarks
 		$amount = floatval(str_replace(',', '', $_POST['amount']));
 		$remarks = addslashes(htmlentities($_POST['remarks']));
 		$_POST['amount'] = $amount;
 		$_POST['remarks'] = $remarks;
 	
-		// ✅ Get current user ID
 		$user_id = $this->settings->userdata('id');
 	
-		// ✅ Get current M-PESA balance
+		// Get current M-PESA balance
 		$mpesa_qry = $this->conn->query("SELECT balance FROM mpesa_balance WHERE user_id = '{$user_id}'");
 		$mpesa_balance = 0;
 		if ($mpesa_qry->num_rows > 0) {
 			$mpesa_balance = floatval($mpesa_qry->fetch_assoc()['balance']);
 		}
 	
-		// ✅ Check if M-PESA balance is enough
-		if ($amount > $mpesa_balance) {
+		$previous_amount = 0;
+		$amount_to_deduct = $amount;
+	
+		if (!empty($id)) {
+			// Fetch the old amount before update
+			$prev_qry = $this->conn->query("SELECT amount FROM running_balance WHERE id = '{$id}' AND user_id = '{$user_id}'");
+			if ($prev_qry->num_rows > 0) {
+				$previous_amount = floatval($prev_qry->fetch_assoc()['amount']);
+			}
+			// Calculate difference
+			$amount_to_deduct = $amount - $previous_amount;
+		}
+	
+		// Only check if balance is sufficient if deduction is positive
+		if ($amount_to_deduct > 0 && $amount_to_deduct > $mpesa_balance) {
 			return json_encode([
 				'status' => 'failed',
-				'msg' => 'Expense failed! M-PESA balance is too low.'
+				'msg' => 'Expense update failed! M-PESA balance is too low for this change.'
 			]);
 		}
 	
-		// ✅ Prepare data for insert/update
+		// Prepare data for insert/update
 		$data = "";
 		foreach($_POST as $k => $v){
 			if($k == 'id') continue;
 			if(!empty($data)) $data .=",";
-	
 			$data .= " `{$k}`='{$v}' ";
 		}
 		if(!empty($data)) $data .=",";
-	
 		$data .= " `user_id`='{$user_id}' ";
 	
-		// ✅ Insert or update expense
+		// Insert or update expense
 		if(empty($id)){
 			$sql = "INSERT INTO `running_balance` SET $data";
 		} else {
@@ -181,31 +210,33 @@ Class Master extends DBConnection {
 	
 		$save = $this->conn->query($sql);
 		if($save){
-			// ✅ Deduct from M-PESA balance
-			$deduct = $this->conn->query("UPDATE mpesa_balance SET balance = balance - {$amount} WHERE user_id = '{$user_id}'");
-			if(!$deduct){
-				$resp['status'] = 'failed';
-				$resp['msg'] = 'Error deducting M-PESA balance: ' . $this->conn->error;
-				return json_encode($resp);
+			if ($amount_to_deduct != 0) {
+				$deduct = $this->conn->query("UPDATE mpesa_balance SET balance = balance - ({$amount_to_deduct}) WHERE user_id = '{$user_id}'");
+				if(!$deduct){
+					return json_encode([
+						'status' => 'failed',
+						'msg' => 'Error adjusting M-PESA balance: ' . $this->conn->error
+					]);
+				}
+	
+				$trans_code = uniqid('EXP');
+				$insert_transaction = $this->conn->query("
+					INSERT INTO mpesa_topups (user_id, type, amount, transaction, remarks)
+					VALUES ('{$user_id}', 'debit', '{$amount_to_deduct}', '{$trans_code}', 'Expense adjustment for category ID: {$_POST['category_id']}')
+				");
+				if(!$insert_transaction){
+					return json_encode([
+						'status' => 'failed',
+						'msg' => 'Error saving M-PESA transaction: ' . $this->conn->error
+					]);
+				}
 			}
 	
-			// ✅ Log the transaction (make sure 'transaction_code' column exists in mpesa_topups)
-			$trans_code = uniqid('EXP');
-			$insert_transaction = $this->conn->query("
-				INSERT INTO mpesa_topups (user_id, type, amount, transaction, remarks)
-				VALUES ('{$user_id}', 'debit', '{$amount}', '{$trans_code}', 'Expense for category ID: {$_POST['category_id']}')
-			");
-			if(!$insert_transaction){
-				$resp['status'] = 'failed';
-				$resp['msg'] = 'Error saving M-PESA transaction: ' . $this->conn->error;
-				return json_encode($resp);
-			}
-	
-			// ✅ Update budget balance
+			// Update budget balance
 			$update_balance = $this->update_balance($_POST['category_id']);
 			if($update_balance == 1){
 				$resp['status'] = 'success';
-				$this->settings->set_flashdata('success', "Expense successfully saved.");
+				$this->settings->set_flashdata('success', "Expense saved successfully.");
 			} else {
 				$resp['status'] = 'failed';
 				$resp['error'] = $update_balance;

@@ -1,14 +1,9 @@
 
 <?php
 // Assuming the user is logged in and the user_id is stored in the session
-if (!isset($_SESSION['user_id'])) {
-    // Redirect the user to the login page or show an error message
-    header('Location: login.php');
-    exit();
-}
-$user_id = $_SESSION['user_id'];  // Ensure user_id is correctly set in the session
 
-$user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : null;
+$user = $conn->query("SELECT id FROM users WHERE username = '{$_SESSION['username']}'")->fetch_assoc();
+$user_id = $user['id'];
 
 // Default date range if not specified
 $date_start = isset($_GET['date_start']) ? $_GET['date_start'] :  date("Y-m-d", strtotime(date("Y-m-d")." -7 days"));

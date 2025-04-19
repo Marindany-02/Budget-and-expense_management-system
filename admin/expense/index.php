@@ -7,12 +7,12 @@
 	<div class="card-header">
 		<h3 class="card-title">Expense Management</h3>
 		<div class="card-tools">
-			<a href="javascript:void(0)" id="manage_expense" class="btn btn-flat btn-sm btn-primary"><span class="fas fa-plus"></span>  Add New</a>
+			<a href="?page=expense/manage_expense" class="btn btn-flat btn-sm btn-primary"><span class="fas fa-plus"></span>  Add New</a>
 		</div>
 	</div>
 	<div class="card-body">
 		<div class="container-fluid">
-        <div class="container-fluid">
+		<div class="table-responsive">
 			<table class="table table-bordered table-stripped">
 				<colgroup>
 					<col width="5%">
@@ -41,10 +41,10 @@ $user_id = $user['id']; // Get user_id
 $i = 1;
 // Only fetch records belonging to this user
 $qry = $conn->query("SELECT r.*, c.category, c.balance 
-					 FROM `running_balance` r 
-					 INNER JOIN `categories` c ON r.category_id = c.id 
-					 WHERE c.status = 1 AND r.balance_type = 2 AND r.user_id = '{$user_id}' 
-					 ORDER BY UNIX_TIMESTAMP(r.date_created) DESC");
+                     FROM `running_balance` r 
+                     INNER JOIN `categories` c ON r.category_id = c.id 
+                     WHERE c.status = 1 AND r.balance_type = 2 AND r.user_id = '{$user_id}'
+                     ORDER BY UNIX_TIMESTAMP(r.date_created) DESC");
 
 while($row = $qry->fetch_assoc()):
 	foreach($row as $k => $v){
@@ -64,7 +64,9 @@ while($row = $qry->fetch_assoc()):
 				                    <span class="sr-only">Toggle Dropdown</span>
 				                  </button>
 				                  <div class="dropdown-menu" role="menu">
-				                    <a class="dropdown-item manage_expense" href="javascript:void(0)" data-id="<?php echo $row['id'] ?>"><span class="fa fa-edit text-primary"></span> Edit</a>
+								  <a class="dropdown-item" href="?page=expense/manage_expense&id=<?= htmlspecialchars($row['id'], ENT_QUOTES, 'UTF-8') ?>">
+								  <span class="fa fa-edit text-primary"></span> Edit
+</a>
 				                    <div class="dropdown-divider"></div>
 				                    <a class="dropdown-item delete_data" href="javascript:void(0)" data-id="<?php echo $row['id'] ?>" data-category_id="<?php echo $row['category_id'] ?>"><span class="fa fa-trash text-danger"></span> Delete</a>
 				                  </div>
@@ -78,13 +80,13 @@ while($row = $qry->fetch_assoc()):
 	</div>
 </div>
 <script>
+	$('.edit_expense').click(function(){
+		var id = $(this).data('id');
+		uni_modal("Edit Expense", "expense/manage_expense.php?id=" + id, "mid-large");
+	});
+
 	$(document).ready(function(){
-		$('#manage_expense').click(function(){
-			uni_modal("<i class='fa fa-plus'></i> Add New Expense",'expense/manage_expense.php')
-		})
-		$('.manage_expense').click(function(){
-			uni_modal("<i class='fa fa-edit'></i> Update Expense",'expense/manage_expense.php?id='+$(this).attr('data-id'))
-		})
+
 		$('.delete_data').click(function(){
 			_conf("Are you sure to delete this expense permanently?","delete_expense",[$(this).attr('data-id'),$(this).attr('data-category_id')])
 		})
@@ -128,4 +130,34 @@ while($row = $qry->fetch_assoc()):
 			}
 		})
 	}
+</script>
+<script>
+	$(document).on('click', '.edit-expense', function() {
+	let id = $(this).data('id');
+	// Fetch the data for the given ID
+	$.ajax({
+		url: 'ajax.php?action=get_expense',
+		method: 'POST',
+		data: { id: id },
+		dataType: 'json',
+		success: function(resp) {
+			if (resp.status === 'success') {
+				// Populate the form fields
+				$('#expense_id').val(resp.data.id);
+				$('#amount').val(resp.data.amount);
+				$('#remarks').val(resp.data.remarks);
+				$('#category_id').val(resp.data.category_id).trigger('change');
+				// Change button text to "Update" maybe
+				$('#saveBtn').text('Update Expense');
+			} else {
+				alert(resp.msg || 'Failed to fetch expense data.');
+			}
+		},
+		error: function(err) {
+			console.log(err);
+			alert('An error occurred while fetching the expense.');
+		}
+	});
+});
+
 </script>

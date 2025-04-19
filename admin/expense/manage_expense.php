@@ -1,146 +1,103 @@
-
 <?php
-require_once("../../config.php");
-if(isset($_GET['id']) && $_GET['id'] > 0){
-    $qry = $conn->query("SELECT * from `running_balance` where id = '{$_GET['id']}' ");
+include_once(__DIR__ . '/../../config.php');
+?>
+<?php 
+$id = isset($_GET['id']) ? $_GET['id'] : '';
+$form_title = "Add Expense";
+if(!empty($id)){
+    $qry = $conn->query("SELECT * FROM running_balance WHERE id = '$id'");
     if($qry->num_rows > 0){
-        foreach($qry->fetch_assoc() as $k => $v){
-            $$k=stripslashes($v);
+        $data = $qry->fetch_assoc();
+        foreach($data as $k => $v){
+            $$k = $v;
         }
+        $form_title = "Update Expense";
     }
 }
-if (!isset($_SESSION['user_id'])) {
-    die("Unauthorized access.");
-}
-
 ?>
-<div class="conteiner-fluid">
-<form action="" id="expense-form">
-    <input type="hidden" name ="id" value="<?php echo isset($id) ? $id : '' ?>">
-    <input type="hidden" name ="balance_type" value="2">
-    <?php if(!isset($id)): ?>
 
-        <div class="form-group">
-    <label for="category_id" class="control-label">Category</label>
-    <select name="category_id" id="category_id" class="custom-select select2" required>
-        <option value=""></option>
-        <?php
-$user = $conn->query("SELECT id FROM users WHERE username = '{$_SESSION['username']}'")->fetch_assoc(); 
-$user_id = $user['id']; // Get user_id
-$qry = $conn->query("SELECT * FROM `categories` WHERE `user_id` = '{$user_id}' AND `balance` > 0 ORDER BY category ASC");
-            while($row = $qry->fetch_assoc()):
-        ?>
-        <option value="<?php echo $row['id'] ?>" 
-                <?php echo isset($category_id) && $category_id == $row['id'] ? 'selected' : '' ?> 
-                data-balance="<?php echo $row['balance'] ?>">
-            <?php echo $row['category']." [".number_format($row['balance'])."]" ?>
-        </option>
-        <?php endwhile; ?>
-    </select>
-</div>
+<h4 class="mb-3 fw-bold"><?= $form_title ?></h4>
 
-    
-    <?php else: ?>
-        <div class="form-group">
-            <label for="category_id" class="control-label">Category</label>
-            <input type="hidden" name="category_id" value="<?php echo $category_id ?>">
-            <?php
-            $qry = $conn->query("SELECT * FROM `categories` WHERE id = '{$category_id}' AND `user_id` = '{$_SESSION['user_id']}'");
-            $cat_res = $qry->fetch_assoc();
-            $balance = $cat_res['balance'] + $amount;
-            ?>
-            <p><b><?php echo $cat_res['category'] ?> [<?php echo number_format($balance) ?>]</b></p>
-            <input type="hidden" id="balance" value="<?php echo $balance ?>">
+<div class="card shadow rounded p-4">
+    <form action="" id="expense-form">
+        <input type="hidden" name="id" value="<?= isset($id) ? $id : '' ?>">
+        <input type="hidden" name="balance_type" value="2"> <!-- 2 = Expense -->
+
+        <div class="form-group mb-3">
+            <label for="category_id" class="control-label fw-bold">Category</label>
+            <select name="category_id" id="category_id" class="form-control select2" required>
+                <option value="" disabled selected>Select Category</option>
+                <?php 
+                $user_id = $_settings->userdata('id');
+                $cat_qry = $conn->query("SELECT c.*, 
+                    (SELECT IFNULL(SUM(amount),0) FROM running_balance rb WHERE rb.category_id = c.id AND rb.user_id = c.user_id AND rb.balance_type = 1) -
+                    (SELECT IFNULL(SUM(amount),0) FROM running_balance rb WHERE rb.category_id = c.id AND rb.user_id = c.user_id AND rb.balance_type = 2) AS balance
+                FROM categories c 
+                WHERE c.status = 1 AND c.user_id = '{$user_id}' 
+                ORDER BY c.category ASC");
+
+                while($row = $cat_qry->fetch_assoc()):
+                    $bal = number_format($row['balance']);
+                ?>
+                    <option value="<?= $row['id'] ?>" <?= isset($category_id) && $category_id == $row['id'] ? 'selected' : '' ?>>
+                        <?= $row['category'] ?> (<?= $bal ?>)
+                    </option>
+                <?php endwhile; ?>
+            </select>
         </div>
-    <?php endif; ?>
-    <div class="form-group">
-        <label for="amount" class="control-label">Amount</label>
-        <input name="amount" id="amount" class="form-control form text-right number" value="<?php echo isset($amount) ? ($amount) : 0; ?>">
-    </div>
-    <div class="form-group">
-        <label for="remarks" class="control-label">Remarks</label>
-        <textarea name="remarks" id="" cols="30" rows="2" class="form-control form no-resize summernote"><?php echo isset($remarks) ? $remarks : ''; ?></textarea>
-    </div>
-</form>
-</div>
-<script>
-  
-	$(document).ready(function(){
-        $('.select2').select2({placeholder:"Please Select here",width:"relative"})
-        $('.number').on('load input change',function(){
-            var txt = $(this).val()
-                var p = (txt.match(/[.]/g) || []).length;
-                    console.log(p)
-                if(txt.slice(-1) == '.' && p > 1){
-                    $(this).val(txt.slice(0,-1))
-                    return false;
-                }
-                if(txt.slice(-1) == '.'){
-                    txt = txt
-                }else{
-                    txt = txt.split('.')
-                    ntxt = ((txt[0]).replace(/\D/g,''));
-                    if(!!txt[1])
-                    ntxt += "."+txt[1]
-                    ntxt = ntxt > 0 ? ntxt : 0;
-                    txt = parseFloat(ntxt).toLocaleString('en-US')
-                }
-                $(this).val(txt)
-        })
-        $('.number').trigger('change')
-		$('#expense-form').submit(function(e){
-			e.preventDefault();
-            var _this = $(this)
-			 $('.err-msg').remove();
-             $("[name='amount']").removeClass("border-danger")
-			start_loader();
-            var cat_id = $("[name='category_id']").val();
-            var cat_balance = $('#balance').length > 0 ? $('#balance').val() : $("[name='category_id'] option[value='"+cat_id+"']").attr('data-balance');
-            var amount = $("[name='amount']").val();
-                amount = amount.replace(/,/g,"");
-                console.log(cat_balance,amount)
-                console.log(amount > cat_balance)
-            if(parseFloat(amount) > parseFloat(cat_balance)){
-                var el = $('<div>')
-                    el.addClass("alert alert-danger err-msg mt-2").text("Entered Amount is greater than the selected category balance.")
-                    $("[name='amount']").after(el)
-                    el.show('slow')
-                    $("[name='amount']").addClass("border-danger").focus()
-                end_loader();
-                return false;
-            }
-			$.ajax({
-				url:_base_url_+"classes/Master.php?f=save_expense",
-				data: new FormData($(this)[0]),
-                cache: false,
-                contentType: false,
-                processData: false,
-                method: 'POST',
-                type: 'POST',
-                dataType: 'json',
-				error:err=>{
-					console.log(err)
-					alert_toast("An error occured",'error');
-					end_loader();
-				},
-				success:function(resp){
-					if(typeof resp =='object' && resp.status == 'success'){
-						location.reload()
-					}else if(resp.status == 'failed' && !!resp.msg){
-                        var el = $('<div>')
-                            el.addClass("alert alert-danger err-msg").text(resp.msg)
-                            _this.prepend(el)
-                            el.show('slow')
-                            $("html, body").animate({ scrollTop: _this.closest('.card').offset().top }, "fast");
-                            end_loader()
-                    }else{
-						alert_toast("An error occured",'error');
-						end_loader();
-                        console.log(resp)
-					}
-				}
-			})
-		})
 
-	})
+        <div class="form-group mb-3">
+            <label for="amount" class="control-label fw-bold">Amount</label>
+            <input type="text" name="amount" id="amount" class="form-control text-end" required value="<?= isset($amount) ? number_format($amount) : '' ?>">
+        </div>
+
+        <div class="form-group mb-4">
+            <label for="remarks" class="control-label fw-bold">Remarks</label>
+            <textarea rows="3" name="remarks" id="remarks" class="form-control"><?= isset($remarks) ? $remarks : '' ?></textarea>
+        </div>
+
+        <div class="form-group d-flex justify-content-between">
+            <a href="./?page=expense/index" class="btn btn-secondary px-4">← Back to Index</a>
+            <button type="submit" class="btn btn-primary px-4">
+                <?= !empty($id) ? 'Update Expense' : 'Save Expense' ?>
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+    $(function(){
+        $('#expense-form').submit(function(e){
+            e.preventDefault();
+            var _this = $(this);
+            start_loader();
+            $.ajax({
+                url: _base_url_ + "classes/Master.php?f=save_expense",
+                method: "POST",
+                data: _this.serialize(),
+                dataType: "json",
+                error: err => {
+                    console.log(err);
+                    alert_toast("An error occurred", 'error');
+                    end_loader();
+                },
+                success: function(resp){
+                    if(resp.status === 'success'){
+                        alert_toast("Expense saved successfully", 'success');
+                        setTimeout(function(){
+                            location.href = _base_url_ + "admin/?page=expense/index";
+                        }, 1500);
+                    } else {
+                        alert_toast(resp.msg || "An error occurred", 'error');
+                        end_loader();
+                    }
+                }
+            });
+        });
+
+        $('.select2').select2({
+            placeholder: "Select here",
+            width: "100%"
+        });
+    });
 </script>

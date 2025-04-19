@@ -7,7 +7,8 @@
 <?php 
 $date_start = isset($_GET['date_start']) ? $_GET['date_start'] : date("Y-m-d",strtotime(date("Y-m-d")." -7 days"));
 $date_end = isset($_GET['date_end']) ? $_GET['date_end'] : date("Y-m-d");
-$user_id = $_SESSION['user_id'];  // Assuming 'user_id' is stored in the session
+$user = $conn->query("SELECT id FROM users WHERE username = '{$_SESSION['username']}' LIMIT 1")->fetch_assoc(); // Fetch user row
+$user_id = $user['id']; // Get user_id from the row
 ?>
 
 <div class="card card-primary card-outline">
